@@ -42,8 +42,12 @@ calculate_shadow <- function(elevation_raster, azimuth, altitude) {
 ## GET OVERLAPPING AREA
 get_overlapping_area <- function(x, y, z) {
   
+  ## Modify shade
+  y <- ifel(
+    y == 1, 2, 0
+  )
   ## Get overlapping area
-  overlap_sr <- x * y
+  overlap_sr <- x + y
   ## Extract only intersecting area
   cropped <- crop(overlap_sr, vect(z))
   
@@ -53,7 +57,7 @@ get_overlapping_area <- function(x, y, z) {
 
 
 ## PLOTS 
-plot_lidar_footprint <- function(data, boundaries) {
+plot_lidar_footprint <- function(data, uav_data, boundaries) {
   
   ggplot() +
     geom_spatraster(
@@ -64,6 +68,13 @@ plot_lidar_footprint <- function(data, boundaries) {
       fill = NA,
       size = 2,
       lwd  = 1
+    ) +
+    geom_point(
+      data = uav_data,
+      aes(position_x, position_y),
+      fill  = "red",
+      size  = 3,
+      shape = 21
     ) +
     scale_fill_manual(
       values = c("#F4E9CD", "#659B5E"),
@@ -75,7 +86,7 @@ plot_lidar_footprint <- function(data, boundaries) {
       datum       = st_crs(data)
     ) +
     labs(
-      fill = NULL
+      fill = NULL, x = NULL, y = NULL
     ) +
     theme_minimal(base_size = 12) +
     theme(
@@ -86,7 +97,7 @@ plot_lidar_footprint <- function(data, boundaries) {
   
 }
 
-plot_sun_shadow <- function(data, boundaries) {
+plot_sun_shadow <- function(data, uav_data, boundaries) {
   
   ggplot() +
     geom_spatraster(
@@ -97,6 +108,13 @@ plot_sun_shadow <- function(data, boundaries) {
       fill = NA,
       size = 2,
       lwd  = 1
+    ) +
+    geom_point(
+      data = uav_data,
+      aes(position_x, position_y),
+      fill  = "red",
+      size  = 3,
+      shape = 21
     ) +
     scale_fill_manual(
       values = c("#F4E9CD", "#659B5E"),
@@ -108,7 +126,7 @@ plot_sun_shadow <- function(data, boundaries) {
       datum       = st_crs(data)
     ) +
     labs(
-      fill = NULL
+      fill = NULL, x = NULL, y = NULL
     ) +
     theme_minimal(base_size = 12) +
     theme(
@@ -119,7 +137,7 @@ plot_sun_shadow <- function(data, boundaries) {
   
 }
 
-plot_overlap <- function(data, boundaries) {
+plot_overlap <- function(data, uav_data, boundaries) {
   
   ggplot() +
     geom_spatraster(
@@ -131,9 +149,16 @@ plot_overlap <- function(data, boundaries) {
       size = 2,
       lwd  = 1
     ) +
+    geom_point(
+      data = uav_data,
+      aes(position_x, position_y),
+      fill  = "red",
+      size  = 3,
+      shape = 21
+    ) +
     scale_fill_manual(
-      values = c("#F4E9CD", "#659B5E"),
-      labels = c("Not overlapped", "Overlapped"),
+      values = c("#F4E9CD", "#B7D3F2", "#F58F29", "#005377"),
+      labels = c("Not seen", "Seen by UAV", "Sunlit", "UAV + Sunlit"),
       na.translate = FALSE
     ) +
     coord_sf(
@@ -141,7 +166,7 @@ plot_overlap <- function(data, boundaries) {
       datum       = st_crs(data)
     ) +
     labs(
-      fill = NULL
+      fill = NULL, x = NULL, y = NULL
     ) +
     theme_minimal(base_size = 12) +
     theme(
@@ -166,4 +191,81 @@ calculate_area <- function(r, boundaries) {
 }
 
 
+## Create interactive map
 
+get_leaflet_map <- function(uav_r, overlapping_sr, shade_sr,
+                            lidar_footprint_sr, boundaries_sf) {
+  
+  ## Convert UAV tibble to sf
+  uav_sf <- uav_r |> 
+    st_as_sf(
+      coords = c("position_x", "position_y"),
+      crs    = crs(overlapping_sr)
+    ) |> 
+    st_transform(4326)
+  
+  ## Function for popup
+  uav_popup <- function(height, plot_id) {
+    
+    glue::glue(
+      "<b>Plot:</b> {plot_id}
+    <br>
+    <b>Height:</b> {height} meters"
+    )
+    
+  }
+  
+  ## Classify layer
+  overlapping_class <- ifel(
+    overlapping_sr == 0, NA, overlapping_sr
+  ) |> as.factor()
+  
+  ## Create map
+  leaflet(options = leafletOptions(maxZoom = 20)) |> 
+    addProviderTiles(provider = "Esri.WorldImagery") |> 
+    addRasterImage(
+      x      = overlapping_class,
+      colors = c("#B7D3F2", "#F58F29", "#005377"),
+      group  = "Overlapping"
+    ) |> 
+    addLegend(
+      colors   = c("#B7D3F2", "#F58F29", "#005377"),
+      labels   = c("Seen by UAV", "Sunlit", "UAV + Sunlit"),
+      group    = "Overlapping",
+      opacity  = 1,
+      position = "bottomright"
+    ) |>
+    addRasterImage(
+      x = ifel(
+        shade_sr == 1, 1, NA
+      ),
+      group = "Not shadowed"
+    ) |>
+    addRasterImage(
+      x = ifel(
+        lidar_footprint_sr == 1, 1, NA
+      ),
+      group = "UAV footprint"
+    ) |> 
+    addCircles(
+      data = uav_sf,
+      popup = ~uav_popup(height, plot_id)
+    ) |> 
+    addPolygons(
+      data    = boundaries_sf |> st_transform(4326),
+      fill    = NA,
+      color   = "red",
+      opacity = 1,
+      group   = "Convex Hull"
+    ) |> 
+    addLayersControl(
+      overlayGroups = c("Overlapping", "Not shadowed", 
+                        "UAV footprint", "Convex Hull"),
+      options = layersControlOptions(collapsed = FALSE)
+    ) |> 
+    addMeasure(
+      primaryLengthUnit = "meters",
+      primaryAreaUnit   = "hectares"
+    )
+  
+}

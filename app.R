@@ -11,6 +11,7 @@
 
 library(bsicons)
 library(bslib)
+library(leaflet)
 library(shiny)
 library(shinyWidgets)
 library(sf)
@@ -29,17 +30,22 @@ valeer_tbl <- read_csv("data/valeer.csv")
 ## Load boundaries
 boundaries_raw_sf <- read_rds("data/boundaries_vector.rds")
 
+## Load UAV positions
+uav_tbl <- read_rds("data/drone_position.rds")
+
 ## Digital Surface Model
 
 
 # 3. UI -------------------------------------------------------------------
 
-ui <- page_sidebar(
+ui <- page_navbar(
     title = "Footprint Calculator",
-    theme = bs_theme(preset = "flatly"),
+    theme = bs_theme(preset = "litera"),
     ## 3.1. SIDEBAR --------------
     sidebar = sidebar(
         title = h3("Filters"),
+        hr(),
+        ## 3.1.1. Filters section
         virtualSelectInput(
             inputId  = "plot_id",
             label    = "Select plot",
@@ -58,33 +64,53 @@ ui <- page_sidebar(
             label   = "Select date",
             value   = "2023-06-01"
         ),
+        hr(),
         actionBttn(
             inputId = "button",
             label   = "Apply",
             icon    = icon("play")
+        ),
+        hr(),
+        ## 3.1.2. Download section
+        h3("Download analysis"),
+        hr(),
+        p("Download the files from the current analysis"),
+        downloadBttn(
+            outputId = "download_data",
+            label    = "Download",
+            color    = "success"
         )
     ),
     ## 3.2. BODY ----------------
-    
-    uiOutput("valueboxes"),
-    
-    layout_columns(
-        card(
-            card_header("Lidar Footprint Area"),
-            plotOutput("footprint_plot"),
-            full_screen = TRUE
-        ),
-        card(
-            card_header("Sun Exposure Area"),
-            plotOutput("shade_plot"),
-            full_screen = TRUE
-        ),
-        card(
-            card_header("Overlapping Area"),
-            plotOutput("overlapping_plot"),
-            full_screen = TRUE
+    nav_panel(
+        title = "Analyzer",
+        uiOutput("valueboxes"),
+        
+        layout_columns(
+            card(
+                card_header("Lidar Footprint Area"),
+                plotOutput("footprint_plot"),
+                full_screen = TRUE
+            ),
+            card(
+                card_header("Sun Exposure Area"),
+                plotOutput("shade_plot"),
+                full_screen = TRUE
+            ),
+            card(
+                card_header("Overlapping Area"),
+                plotOutput("overlapping_plot"),
+                full_screen = TRUE
+            )
         )
+    ),
+    
+    nav_panel(
+        title = "Interactive",
+        leafletOutput("leaflet_map")
     )
+    
+    
 )
 
 # 4. Server ---------------------------------------------------------------
@@ -117,6 +143,7 @@ server <- function(input, output) {
             str_glue("data/lidar_footprints/{input$plot_id}.tif")
         )
     }) |> bindEvent(input$button, ignoreNULL = FALSE)
+    
     ### DSM
     dsm_sr <- reactive({
 
@@ -125,9 +152,18 @@ server <- function(input, output) {
         dsm <- rast("data/dsm.tif")
         crop(dsm, vect(boundaries_sf()))
     }) |> bindEvent(input$button, ignoreNULL = FALSE)
-
+    
+    ### UAV position
+    uav_r <- reactive({
+        
+        uav_tbl |> 
+            filter(plot_id == input$plot_id)
+        
+    }) |> bindEvent(input$button, ignoreNULL = FALSE)
+    
+    
     ## 4.2. Calc data --------------------
-    ### Shade
+    ### Shade layer
     shade_sr <- reactive({
 
         req(dsm_sr())
@@ -138,7 +174,7 @@ server <- function(input, output) {
             altitude         = boundaries_sf()$sun_altitude
         )
     })
-    ### Overlapping
+    ### Overlapping layer
     overlapping_sr <- reactive({
 
         req(lidar_footprint_sr())
@@ -151,7 +187,7 @@ server <- function(input, output) {
             z = boundaries_sf()
         )
     })
-    ### Area
+    ### Calculate area
     plot_area <- reactive({
         req(boundaries_sf())
         
@@ -181,15 +217,27 @@ server <- function(input, output) {
     ## 4.3. Visualizations ----------------
     
     output$footprint_plot <- renderPlot({
-        plot_lidar_footprint(lidar_footprint_sr(), boundaries_sf())
+        plot_lidar_footprint(
+            data       = lidar_footprint_sr(), 
+            uav_data   = uav_r(),
+            boundaries = boundaries_sf()
+        )
     })
     
     output$shade_plot <- renderPlot({
-        plot_sun_shadow(shade_sr(), boundaries_sf())
+        plot_sun_shadow(
+            data       = shade_sr(),
+            uav_data   = uav_r(),
+            boundaries = boundaries_sf()
+        )
     })
     
     output$overlapping_plot <- renderPlot({
-        plot_overlap(overlapping_sr(), boundaries_sf())
+        plot_overlap(
+            data       = overlapping_sr(),
+            uav_data   = uav_r(),
+            boundaries = boundaries_sf()
+        )
     })
     
     ## 4.4. Value boxes -----------------
@@ -201,37 +249,37 @@ server <- function(input, output) {
                 column(
                     3,
                     value_box(
-                        title = "Plot Size",
-                        value = paste0(plot_area(), "ha"),
+                        title    = "Plot Size",
+                        value    = paste0(plot_area(), "ha"),
                         showcase = bs_icon("graph-up"),
-                        theme = "primary"
+                        theme    = "primary"
                     )
                 ),
                 column(
                     3,
                     value_box(
-                        title = "LiDAR footprint",
-                        value = paste0(lidar_area(), "ha"),
+                        title    = "LiDAR footprint",
+                        value    = paste0(lidar_area(), "ha"),
                         showcase = bs_icon("graph-up"),
-                        theme = "teal"
+                        theme    = "teal"
                     )
                 ),
                 column(
                     3,
                     value_box(
-                        title = "Sun Radiation",
-                        value = paste0(shade_area(), "ha"),
+                        title    = "Sun Radiation",
+                        value    = paste0(shade_area(), "ha"),
                         showcase = bs_icon("graph-up"),
-                        theme = "secondary"
+                        theme    = "secondary"
                     )
                 ),
                 column(
                     3,
                     value_box(
-                        title = "LiDAR footprint",
-                        value = paste0(overlapping_area(), "ha"),
+                        title    = "LiDAR footprint",
+                        value    = paste0(overlapping_area(), "ha"),
                         showcase = bs_icon("graph-up"),
-                        theme = "primary"
+                        theme    = "primary"
                     ) 
                 )
             )
@@ -239,6 +287,64 @@ server <- function(input, output) {
         
     })
     
+    # 5. Leaflet map --------------
+    
+    ## React on click
+    leaflet_map <- reactive({
+        
+        req(uav_r())
+        req(overlapping_sr())
+        req(lidar_footprint_sr())
+        req(shade_sr())
+        req(boundaries_sf())
+        
+        get_leaflet_map(
+            uav_r              = uav_r(),
+            overlapping_sr     = overlapping_sr(),
+            shade_sr           = shade_sr(),
+            lidar_footprint_sr = lidar_footprint_sr(),
+            boundaries_sf      = boundaries_sf()
+        )
+    }) |> bindEvent(input$button, ignoreNULL = FALSE)
+    
+    output$leaflet_map <- renderLeaflet({
+        
+        leaflet_map()
+
+    })
+    
+    # 6. Download data ------------
+    output$download_data <- downloadHandler(
+        
+        filename = function() {
+            fname <- paste("data", 
+                  input$plot_id, 
+                  input$date,
+                  paste0(str_sub(input$time, 1, 2), "h"),
+                  sep = "-")
+            paste0(fname, ".zip")
+        },
+        
+        content = function(file) {
+            ## Download rasters
+            download_rst <- c(
+                lidar_footprint_sr(),
+                shade_sr(),
+                overlapping_sr()
+            )
+            names(download_rst) <- c("lidar_footprint", "shade", "overlapping")
+            writeRaster(download_rst, "rasters.tif", overwrite = TRUE)
+            ## Download boundaries
+            write_sf(
+                boundaries_sf(),
+                "boundaries.geojson",
+                append = FALSE
+            )
+            ## Zip files
+            zip::zip(file, files = c("rasters.tif", "boundaries.geojson"))
+        }
+        
+    )
     
     
     
