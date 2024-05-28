@@ -11,10 +11,12 @@
 
 library(bsicons)
 library(bslib)
+library(leafem)
 library(leaflet)
 library(shiny)
 library(shinyWidgets)
 library(sf)
+library(stars)
 library(suntools)
 library(terra)
 library(tidyterra)
@@ -33,7 +35,8 @@ boundaries_raw_sf <- read_rds("data/boundaries_vector.rds")
 ## Load UAV positions
 uav_tbl <- read_rds("data/drone_position.rds")
 
-## Digital Surface Model
+## Ortophoto
+ortophoto_sr <- rast("data/valeer_ortophoto.tif")
 
 
 # 3. UI -------------------------------------------------------------------
@@ -158,6 +161,16 @@ server <- function(input, output) {
         
         uav_tbl |> 
             filter(plot_id == input$plot_id)
+        
+    }) |> bindEvent(input$button, ignoreNULL = FALSE)
+    
+    ### Crop ortophoto
+    ortophoto_r <- reactive({
+        
+        req(boundaries_sf())
+        
+        crop(ortophoto_sr, boundaries_sf()) |> 
+            st_as_stars()
         
     }) |> bindEvent(input$button, ignoreNULL = FALSE)
     
@@ -303,7 +316,8 @@ server <- function(input, output) {
             overlapping_sr     = overlapping_sr(),
             shade_sr           = shade_sr(),
             lidar_footprint_sr = lidar_footprint_sr(),
-            boundaries_sf      = boundaries_sf()
+            boundaries_sf      = boundaries_sf(),
+            ortophoto          = ortophoto_r()
         )
     }) |> bindEvent(input$button, ignoreNULL = FALSE)
     

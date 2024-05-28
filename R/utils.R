@@ -194,7 +194,7 @@ calculate_area <- function(r, boundaries) {
 ## Create interactive map
 
 get_leaflet_map <- function(uav_r, overlapping_sr, shade_sr,
-                            lidar_footprint_sr, boundaries_sf) {
+                            lidar_footprint_sr, boundaries_sf, ortophoto) {
   
   ## Convert UAV tibble to sf
   uav_sf <- uav_r |> 
@@ -258,6 +258,10 @@ get_leaflet_map <- function(uav_r, overlapping_sr, shade_sr,
       opacity = 1,
       group   = "Convex Hull"
     ) |> 
+    addRasterRGB(
+      ortophoto,
+      maxBytes = 1e10
+    ) |> 
     addLayersControl(
       overlayGroups = c("Overlapping", "Not shadowed", 
                         "UAV footprint", "Convex Hull"),
@@ -266,6 +270,7 @@ get_leaflet_map <- function(uav_r, overlapping_sr, shade_sr,
     addMeasure(
       primaryLengthUnit = "meters",
       primaryAreaUnit   = "hectares"
-    )
+    ) |> 
+    addHomeButton(group = "Convex Hull")
   
 }
